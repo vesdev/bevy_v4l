@@ -1,0 +1,21 @@
+[package]
+name = "bevy_v4l"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = { version = "0.13.2", default-features = false, features = [
+  "bevy_asset",
+  "bevy_render",
+  "multi-threaded",
+] }
+ffimage = "0.10.0"
+ffimage_yuv = "0.10.0"
+thiserror = "1.0.59"
+tracing = "0.1.40"
+v4l = "0.14.0"
+
+[dev-dependencies]
+bevy = "0.13.2"
