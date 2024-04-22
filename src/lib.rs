@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::tasks::futures_lite::future;
-use bevy::tasks::{block_on, ComputeTaskPool, Task};
+use bevy::tasks::{ComputeTaskPool, Task};
+use bevy::utils::futures;
 use ffimage::color::Rgb;
 use ffimage::iter::{BytesExt, ColorConvertExt, PixelsExt};
 use ffimage_yuv::yuv::Yuv;
@@ -80,34 +80,36 @@ impl Plugin for V4lPlugin {
     }
 }
 
-#[derive(Component)]
-struct DecodeTask(Task<()>);
+#[derive(Component, Default)]
+pub struct Decoder(Option<Task<()>>);
 
-fn present(
-    mut commands: Commands,
-    mut decode_tasks: Query<(&mut DecodeTask, &V4lDevice, Entity)>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    for (mut task, device, e) in decode_tasks.iter_mut() {
-        block_on(future::poll_once(&mut task.0));
-        let Some(image) = images.get_mut(device.image.clone()) else {
+fn present(mut decoders: Query<(&mut Decoder, &V4lDevice)>, mut images: ResMut<Assets<Image>>) {
+    for (mut task, device) in decoders.iter_mut() {
+        let Some(mut task_status) = task.0.as_mut() else {
             continue;
         };
-        let Ok(mut buffer) = device.buffer.lock() else {
-            continue;
-        };
-        std::mem::swap(&mut image.data, &mut buffer);
-        commands.entity(e).remove::<DecodeTask>();
+
+        if let Some(()) = futures::check_ready(&mut task_status) {
+            let Some(image) = images.get_mut(device.image.clone()) else {
+                continue;
+            };
+            let Ok(mut buffer) = device.buffer.lock() else {
+                continue;
+            };
+            std::mem::swap(&mut image.data, &mut buffer);
+            task.0 = None;
+        }
     }
 }
 
-fn decode(
-    mut commands: Commands,
-    mut devices: Query<(&mut V4lDevice, Entity)>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    for (device, e) in devices.iter_mut() {
+fn decode(mut devices: Query<(&mut V4lDevice, &mut Decoder)>, mut images: ResMut<Assets<Image>>) {
+    for (device, mut decoder) in devices.iter_mut() {
         let Some(image) = images.get_mut(device.image.clone()) else {
+            continue;
+        };
+
+        // task is unfinished
+        if decoder.0.is_some() {
             continue;
         };
 
@@ -118,7 +120,7 @@ fn decode(
         let task = ComputeTaskPool::get()
             .spawn(async move { decode_to_rgba(stream, buffer, &fourcc, size as usize).await });
 
-        commands.entity(e).insert(DecodeTask(task));
+        decoder.0 = Some(task);
     }
 }
 

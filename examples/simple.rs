@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_v4l::{V4lDevice, V4lPlugin};
+use bevy_v4l::{Decoder, V4lDevice, V4lPlugin};
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, V4lPlugin))
@@ -16,5 +16,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             ..default()
         },
         device,
+        Decoder::default(),
     ));
 }
