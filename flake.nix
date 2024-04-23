@@ -69,6 +69,7 @@
                 "rustfmt"
               ];
             })
+            cargo-flamegraph
           ];
         in
         {

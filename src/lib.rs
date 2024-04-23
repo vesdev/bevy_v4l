@@ -29,9 +29,14 @@ pub struct V4lDevice {
     id: usize,
     dev: v4l::Device,
     format: v4l::Format,
-    stream: Arc<Mutex<Stream<'static>>>,
     image: Handle<Image>,
-    buffer: Arc<Mutex<Vec<u8>>>,
+    task: Option<Task<()>>,
+    decoder: Arc<Mutex<Decoder>>,
+}
+
+pub struct Decoder {
+    buffer: Vec<u8>,
+    stream: Stream<'static>,
 }
 
 impl V4lDevice {
@@ -61,9 +66,12 @@ impl V4lDevice {
             id: device_id,
             dev,
             format,
-            stream: Arc::new(Mutex::new(stream)),
             image,
-            buffer: Arc::new(Mutex::new(buffer2)),
+            decoder: Arc::new(Mutex::new(Decoder {
+                buffer: buffer2,
+                stream,
+            })),
+            task: None,
         })
     }
 
@@ -80,12 +88,9 @@ impl Plugin for V4lPlugin {
     }
 }
 
-#[derive(Component, Default)]
-pub struct Decoder(Option<Task<()>>);
-
-fn present(mut decoders: Query<(&mut Decoder, &V4lDevice)>, mut images: ResMut<Assets<Image>>) {
-    for (mut task, device) in decoders.iter_mut() {
-        let Some(mut task_status) = task.0.as_mut() else {
+fn present(mut devices: Query<&mut V4lDevice>, mut images: ResMut<Assets<Image>>) {
+    for mut device in devices.iter_mut() {
+        let Some(mut task_status) = device.task.as_mut() else {
             continue;
         };
 
@@ -93,52 +98,46 @@ fn present(mut decoders: Query<(&mut Decoder, &V4lDevice)>, mut images: ResMut<A
             let Some(image) = images.get_mut(device.image.clone()) else {
                 continue;
             };
-            let Ok(mut buffer) = device.buffer.lock() else {
-                continue;
-            };
-            std::mem::swap(&mut image.data, &mut buffer);
-            task.0 = None;
+
+            if let Ok(mut decoder) = device.decoder.lock() {
+                std::mem::swap(&mut image.data, &mut decoder.buffer);
+            }
+
+            device.task = None;
         }
     }
 }
 
-fn decode(mut devices: Query<(&mut V4lDevice, &mut Decoder)>, mut images: ResMut<Assets<Image>>) {
-    for (device, mut decoder) in devices.iter_mut() {
+fn decode(mut devices: Query<&mut V4lDevice>, mut images: ResMut<Assets<Image>>) {
+    for mut device in devices.iter_mut() {
         let Some(image) = images.get_mut(device.image.clone()) else {
             continue;
         };
 
         // task is unfinished
-        if decoder.0.is_some() {
+        if device.task.is_some() {
             continue;
         };
 
         let fourcc = device.format.fourcc.repr;
-        let stream = device.stream.clone();
         let size = image.width() * image.height() * 4;
-        let buffer = device.buffer.clone();
+        let decoder = device.decoder.clone();
         let task = ComputeTaskPool::get()
-            .spawn(async move { decode_to_rgba(stream, buffer, &fourcc, size as usize).await });
+            .spawn(async move { unsafe { decode_to_rgba(decoder, &fourcc, size as usize) } });
 
-        decoder.0 = Some(task);
+        device.task = Some(task);
     }
 }
 
-async fn decode_to_rgba(
-    stream: Arc<Mutex<Stream<'static>>>,
-    buffer: Arc<Mutex<Vec<u8>>>,
-    fourcc: &[u8; 4],
-    size: usize,
-) {
-    let Ok(mut stream) = stream.lock() else {
+unsafe fn decode_to_rgba(decoder: Arc<Mutex<Decoder>>, fourcc: &[u8; 4], size: usize) {
+    let Ok(mut decoder) = decoder.lock() else {
         return;
     };
 
-    let Ok(mut buffer) = buffer.lock() else {
-        return;
-    };
-
-    let Ok((buf, _)) = stream.next() else {
+    // SAFETY:
+    // mutex is locked for the decoder so nothing else can write to this buffer
+    let buffer: *mut Vec<u8> = &mut decoder.buffer;
+    let Ok((buf, _)) = decoder.stream.next() else {
         return;
     };
 
@@ -162,10 +161,7 @@ async fn decode_to_rgba(
                     break;
                 }
 
-                buffer[i] = pixel[0];
-                buffer[i + 1] = pixel[1];
-                buffer[i + 2] = pixel[2];
-                // no need to write to alpha
+                (*buffer)[i..i + 3].clone_from_slice(&pixel);
             }
         }
         b"IYU2" => {}
