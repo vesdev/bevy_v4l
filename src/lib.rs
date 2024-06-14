@@ -195,7 +195,7 @@ pub struct V4lPlugin;
 impl Plugin for V4lPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_systems(PreUpdate, spawn_io_tasks)
-            .add_systems(Update, poll_io_tasks);
+            .add_systems(PreUpdate, poll_io_tasks);
     }
 }
 
@@ -217,7 +217,6 @@ fn poll_io_tasks(
 
             if let Ok(mut io) = device.io.lock() {
                 std::mem::swap(&mut image.data, &mut io.buffer);
-                tracing::debug!("input capture buffer swapped");
             }
 
             device.task = None;
@@ -231,13 +230,13 @@ fn poll_io_tasks(
         };
 
         if let Some(()) = futures::check_ready(&mut task_status) {
+            println!("{}", device.image.id());
             let Some(image) = images.get_mut(device.image.clone()) else {
                 continue;
             };
 
             if let Ok(mut io) = device.io.lock() {
                 io.buffer = image.data.clone();
-                tracing::debug!("frame buffer cloned to io");
             }
 
             device.task = None;
