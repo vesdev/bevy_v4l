@@ -266,7 +266,7 @@ fn spawn_io_tasks(
         let io = device.io.clone();
         let task = ComputeTaskPool::get().spawn(async move {
             if let Ok(mut io) = io.lock() {
-                stream_read(&mut io, &fourcc, size as usize).unwrap();
+                let _ = stream_read(&mut io, &fourcc, size as usize);
             };
         });
 
@@ -290,7 +290,7 @@ fn spawn_io_tasks(
         let io = device.io.clone();
         let task = ComputeTaskPool::get().spawn(async move {
             if let Ok(mut io) = io.lock() {
-                stream_write(&mut io, &fourcc, size as usize).unwrap();
+                let _ = stream_write(&mut io, &fourcc, size as usize);
             };
         });
 
