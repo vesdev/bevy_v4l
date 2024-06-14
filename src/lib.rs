@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssetUsages;
@@ -216,6 +217,7 @@ fn poll_io_tasks(
 
             if let Ok(mut io) = device.io.lock() {
                 std::mem::swap(&mut image.data, &mut io.buffer);
+                tracing::debug!("input capture buffer swapped");
             }
 
             device.task = None;
@@ -235,6 +237,7 @@ fn poll_io_tasks(
 
             if let Ok(mut io) = device.io.lock() {
                 io.buffer = image.data.clone();
+                tracing::debug!("frame buffer cloned to io");
             }
 
             device.task = None;
